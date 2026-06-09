@@ -2,7 +2,7 @@
 """Generate the Blender extension repository served at blender.extendedmatrix.org.
 
 For each configured tool we read its GitHub Releases and emit one Blender
-``index.json`` per channel, plus a static landing page. No archive is ever
+``index.json`` per channel, plus a tiny root page. No archive is ever
 downloaded: GitHub exposes a ``digest`` (``sha256:...``) and ``size`` for every
 release asset, which map directly onto the ``archive_hash`` / ``archive_size``
 fields Blender expects. So the whole repository is built from release metadata
@@ -27,6 +27,9 @@ Channels (all auto-discovered from the releases that exist)
                         ONLY created when a tool has 2+ stable lines (otherwise
                         it would just duplicate the stable channel).
 
+The human-facing install UI lives on the main site (extendedmatrix.org/download);
+the subdomain root (index.html) just redirects there.
+
 Usage::
 
     python3 scripts/build_repo.py --config repo_config.json --out dist
@@ -34,7 +37,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import re
 import shutil
@@ -243,128 +245,35 @@ def write_index(out: Path, rel_path: str, entries: list) -> None:
     target.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
-# Material "open_with" glyph — the canonical 4-arrow "move/drag" handle.
-_MOVE_ICON = (
-    '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">'
-    '<path d="M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3'
-    'h-3v4h3v3l5-5zm-9 3h-4v3H7l5 5 5-5h-3v-3z"/></svg>'
-)
-
-
 def write_landing(out: Path, cfg: dict, channels: list) -> None:
+    """Root index.html. The human-facing install UI now lives on the main site
+    (extendedmatrix.org/download), so the subdomain root just redirects there.
+    The index.json channels — what Blender actually consumes — are written
+    separately by write_index() and are unaffected."""
+    target = "https://extendedmatrix.org/download"
     site = cfg["site_url"].rstrip("/")
-
-    def url(path: str) -> str:
-        return f"{site}/{path}"
-
-    def block(ch: dict) -> str:
-        u = url(ch["path"])
-        includes = " · ".join(
-            f"{html.escape(n)} <code>{html.escape(v)}</code>" for n, v in ch["contents"]
-        ) or '<span class="muted">no release yet</span>'
-        return f"""
-        <article class="channel">
-          <h3>{html.escape(ch['title'])}</h3>
-          <p class="desc">{html.escape(ch['desc'])}</p>
-          <a class="dnd" href="{html.escape(u)}" title="Drag this into the Blender window">{_MOVE_ICON}<span>Drag &amp; Drop into Blender</span></a>
-          <p class="or">…or copy the repository URL</p>
-          <div class="url">
-            <input readonly value="{html.escape(u)}" onclick="this.select()">
-            <button type="button" onclick="navigator.clipboard.writeText('{html.escape(u)}')">Copy</button>
-          </div>
-          <p class="includes">Includes: {includes}</p>
-        </article>"""
-
-    main_ch = [c for c in channels if c["path"] in ("index.json", "dev/index.json")]
-    pinned = [c for c in channels if c not in main_ch]
-    pinned_section = ""
-    if pinned:
-        pinned_section = f"""
-  <div class="dots">• • •</div>
-  <section>
-    <h2>Pin to a version line <span class="muted" style="font-weight:400">— advanced</span></h2>
-    <p class="sub">Optional. Add one of these only to <strong>stay on a specific version line</strong> — e.g. keep a tool on <code>1.5.x</code> after <code>1.6</code> is released. For normal use, add <em>Stable</em> above instead.</p>
-    <div class="channels">{''.join(block(c) for c in pinned)}</div>
-  </section>"""
-
-    page = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Extended Matrix — Blender Extensions</title>
-<style>
-  :root {{ --fg:#1f2328; --muted:#59636e; --faint:#d0d7de; --accent:#1f6feb; --accent-bg:#ddebff; --code:#eff2f5; }}
-  * {{ box-sizing:border-box; }}
-  body {{ margin:0; background:#fff; color:var(--fg);
-         font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-         -webkit-font-smoothing:antialiased; }}
-  main {{ max-width:760px; margin:0 auto; padding:72px 24px 96px; }}
-  h1 {{ font-size:34px; font-weight:700; letter-spacing:-.021em; margin:0 0 14px; }}
-  .lead {{ font-size:19px; color:var(--muted); margin:0; max-width:60ch; }}
-  h2 {{ font-size:21px; font-weight:600; margin:0 0 10px; letter-spacing:-.01em; }}
-  .sub {{ color:var(--muted); margin:0 0 8px; max-width:64ch; }}
-  .dots {{ text-align:center; color:var(--faint); letter-spacing:.7em; margin:52px 0; font-size:13px; }}
-  ol {{ color:#3b424b; padding-left:22px; margin:14px 0 0; }}
-  ol li {{ margin:7px 0; }}
-  .note {{ color:var(--muted); font-size:14.5px; margin:16px 0 0; }}
-  .channels {{ display:grid; gap:30px; grid-template-columns:1fr 1fr; margin-top:26px; }}
-  .channel h3 {{ font-size:18px; margin:0 0 4px; }}
-  .desc {{ color:var(--muted); font-size:15px; margin:0 0 18px; min-height:44px; }}
-  .dnd {{ display:inline-flex; align-items:center; gap:9px; text-decoration:none;
-          color:var(--accent); fill:var(--accent); font-weight:600; font-size:15px;
-          border:2px dashed #9cc4ff; border-radius:11px; padding:13px 18px; background:#f4f9ff;
-          transition:background .12s,border-color .12s; }}
-  .dnd:hover {{ background:var(--accent-bg); border-color:var(--accent); }}
-  .or {{ color:var(--muted); font-size:13px; margin:16px 0 7px; }}
-  .url {{ display:flex; gap:8px; }}
-  .url input {{ flex:1; min-width:0; font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
-                padding:10px; border:1px solid var(--faint); border-radius:8px; background:#f6f8fa; color:var(--fg); }}
-  .url button {{ border:1px solid var(--faint); background:#f6f8fa; border-radius:8px; padding:10px 15px;
-                 cursor:pointer; font-weight:600; font-size:13px; color:var(--fg); }}
-  .url button:hover {{ background:#eceff2; }}
-  .includes {{ color:var(--muted); font-size:13px; margin:16px 0 0; }}
-  .muted {{ color:var(--muted); }}
-  code {{ background:var(--code); padding:1px 6px; border-radius:5px; font-size:12.5px; }}
-  a {{ color:var(--accent); }}
-  footer {{ color:#8c959f; font-size:13px; margin-top:72px; text-align:center; }}
-  @media (max-width:600px) {{ .channels {{ grid-template-columns:1fr; }} main {{ padding:48px 20px 72px; }} }}
-</style>
-</head>
-<body>
-<main>
-  <header>
-    <h1>Extended Matrix — Blender Extensions</h1>
-    <p class="lead">One-click install and automatic updates for the Extended Matrix Blender tools. Add a channel in Blender 4.4+ and it stays up to date.</p>
-  </header>
-
-  <div class="dots">• • •</div>
-
-  <section>
-    <h2>How it works</h2>
-    <p class="sub">Each channel is a <strong>single repository</strong> you add to Blender <strong>once</strong>. It bundles <strong>both</strong> tools — <strong>EM Tools</strong> and <strong>3D Survey Collection</strong> — and Blender keeps them updated for you.</p>
-    <ol>
-      <li>Drag the <em>Drag &amp; Drop into Blender</em> handle below into the Blender window — or copy the channel URL.</li>
-      <li>If you copied it: <em>Edit ▸ Preferences ▸ Get Extensions ▸ Repositories ▸ + ▸ Add Remote Repository</em>, then paste.</li>
-      <li>Keep <em>Check for Updates on Start</em> enabled for automatic updates.</li>
-      <li>Find the tools in the extensions list, install and enable.</li>
-    </ol>
-    <p class="note">Using drag &amp; drop you’ll do it <strong>twice</strong>: the first adds the repository, the second installs.</p>
-  </section>
-
-  <div class="dots">• • •</div>
-
-  <section>
-    <h2>Choose a channel</h2>
-    <p class="sub">Add just <strong>one</strong>: <strong>Stable</strong> for everyday use, or <strong>Dev</strong> to try prereleases.</p>
-    <div class="channels">{''.join(block(c) for c in main_ch)}</div>
-  </section>
-{pinned_section}
-  <footer>Generated from the tools’ GitHub Releases · <a href="https://www.extendedmatrix.org">extendedmatrix.org</a></footer>
-</main>
-</body>
-</html>
-"""
+    page = (
+        '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        f'<meta http-equiv="refresh" content="0; url={target}">\n'
+        f'<link rel="canonical" href="{target}">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        '<title>Extended Matrix — Blender Extensions</title>\n'
+        '<style>body{margin:0;min-height:100vh;display:flex;align-items:center;'
+        'justify-content:center;text-align:center;padding:24px;background:#fff;color:#1f2328;'
+        'font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}'
+        'a{color:#1f6feb}code{background:#eff2f5;padding:1px 6px;border-radius:5px;font-size:13px}'
+        '.m{color:#59636e;font-size:13px;margin-top:18px}</style>\n'
+        '</head>\n<body>\n<div>\n'
+        '<p>Extended Matrix — Blender extensions repository.</p>\n'
+        f'<p>Redirecting to <a href="{target}">extendedmatrix.org/download</a> …</p>\n'
+        '<p class="m">Repository URLs for Blender '
+        '(Get Extensions → Repositories → Add Remote Repository):<br>\n'
+        f'<code>{site}/index.json</code> (stable) · '
+        f'<code>{site}/dev/index.json</code> (dev)</p>\n'
+        '</div>\n'
+        f'<script>location.replace({target!r})</script>\n'
+        '</body>\n</html>\n'
+    )
     (out / "index.html").write_text(page, encoding="utf-8")
 
 
@@ -405,7 +314,7 @@ def main() -> int:
         print(f"  {ch['path']:<28} {len(ch['entries']):>2} entries  [{contents}]")
 
     write_landing(out, cfg, channels)
-    print(f"\nWrote repository to {out}/  (landing: {out}/index.html)")
+    print(f"\nWrote repository to {out}/  (root: redirect to /download)")
     return 0
 
 
