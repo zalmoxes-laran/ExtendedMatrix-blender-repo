@@ -24,8 +24,8 @@ Channels (all auto-discovered from the releases that exist)
 * dev (prerelease)   -> <out>/dev/index.json         newest prerelease of each tool
 * pinned line        -> <out>/<slug>/<maj>.<min>/index.json
                         newest patch of a stable MAJOR.MINOR line, per tool.
-                        This is what lets e.g. EM 1.5 and 1.6 coexist: a user
-                        who adds /em/1.5/ only ever gets 1.5.x patches.
+                        ONLY created when a tool has 2+ stable lines (otherwise
+                        it would just duplicate the stable channel).
 
 Usage::
 
@@ -41,7 +41,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
 
 
 # --------------------------------------------------------------------------- #
@@ -182,13 +181,12 @@ def discover_channels(cfg: dict, asset_re: re.Pattern) -> list:
     channels: list = []
 
     def channel(title, desc, path):
-        entries, contents = [], []
         return {"title": title, "desc": desc, "path": path,
-                "entries": entries, "contents": contents}
+                "entries": [], "contents": []}
 
     # ---- Stable (latest): newest stable of every tool -------------------- #
     stable = channel(
-        "Stable", "Ultima versione stabile di ogni tool. Per la maggior parte degli utenti.",
+        "Stable", "Latest stable release of each tool. Recommended for most users.",
         "index.json")
     for st in per_tool.values():
         pick = newest(st["stable"])
@@ -199,7 +197,7 @@ def discover_channels(cfg: dict, asset_re: re.Pattern) -> list:
 
     # ---- Dev: newest prerelease of every tool ---------------------------- #
     dev = channel(
-        "Dev", "Ultima prerelease di ogni tool. Bleeding edge, per tester.",
+        "Dev", "Latest prerelease of each tool. Bleeding edge, for testers.",
         "dev/index.json")
     for st in per_tool.values():
         pick = newest(st["dev"])
@@ -209,6 +207,9 @@ def discover_channels(cfg: dict, asset_re: re.Pattern) -> list:
     channels.append(dev)
 
     # ---- Pinned MAJOR.MINOR stable lines, per tool ----------------------- #
+    # Only meaningful once a tool has 2+ stable lines (so users can stay on an
+    # older line after a newer one ships). With a single line it would just
+    # duplicate "Stable", so we skip it entirely.
     for st in per_tool.values():
         tool = st["tool"]
         lines: dict = {}
@@ -217,11 +218,13 @@ def discover_channels(cfg: dict, asset_re: re.Pattern) -> list:
             if pv is None:
                 continue
             lines.setdefault(f"{pv[0]}.{pv[1]}", []).append(r)
+        if len(lines) < 2:
+            continue
         for line in sorted(lines, key=lambda k: tuple(map(int, k.split(".")))):
             pick = newest(lines[line])
             ch = channel(
-                f"{tool['name']} — linea {line}",
-                f"Solo le patch della linea {line}.x di {tool['name']} (resta fissata su questa minor).",
+                f"{tool['name']} — line {line}",
+                f"Only the {line}.x patches of {tool['name']} (stays pinned to this minor).",
                 f"{tool['slug']}/{line}/index.json")
             ch["entries"] = entries_for_release(tool, pick, cfg, asset_re)
             ch["contents"] = [(tool["name"], pick["tag_name"].lstrip("v"))]
@@ -240,89 +243,125 @@ def write_index(out: Path, rel_path: str, entries: list) -> None:
     target.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
 
+# Material "open_with" glyph — the canonical 4-arrow "move/drag" handle.
+_MOVE_ICON = (
+    '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">'
+    '<path d="M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3'
+    'h-3v4h3v3l5-5zm-9 3h-4v3H7l5 5 5-5h-3v-3z"/></svg>'
+)
+
+
 def write_landing(out: Path, cfg: dict, channels: list) -> None:
     site = cfg["site_url"].rstrip("/")
 
     def url(path: str) -> str:
         return f"{site}/{path}"
 
-    def card(ch: dict) -> str:
+    def block(ch: dict) -> str:
         u = url(ch["path"])
-        contents = "".join(
-            f"<li>{html.escape(n)} <code>{html.escape(v)}</code></li>"
-            for n, v in ch["contents"]
-        ) or "<li><em>nessuna release disponibile per ora</em></li>"
+        includes = " · ".join(
+            f"{html.escape(n)} <code>{html.escape(v)}</code>" for n, v in ch["contents"]
+        ) or '<span class="muted">no release yet</span>'
         return f"""
-      <section class="card">
-        <h3>{html.escape(ch['title'])}</h3>
-        <p class="desc">{html.escape(ch['desc'])}</p>
-        <div class="url">
-          <input readonly value="{html.escape(u)}" onclick="this.select()">
-          <button onclick="navigator.clipboard.writeText('{html.escape(u)}')">Copia</button>
-        </div>
-        <p class="dd">oppure <a href="{html.escape(u)}">trascina questo link in Blender</a> (due volte: la prima aggiunge il repository, la seconda installa).</p>
-        <ul class="contents">{contents}</ul>
-      </section>"""
+        <article class="channel">
+          <h3>{html.escape(ch['title'])}</h3>
+          <p class="desc">{html.escape(ch['desc'])}</p>
+          <a class="dnd" href="{html.escape(u)}" title="Drag this into the Blender window">{_MOVE_ICON}<span>Drag &amp; Drop into Blender</span></a>
+          <p class="or">…or copy the repository URL</p>
+          <div class="url">
+            <input readonly value="{html.escape(u)}" onclick="this.select()">
+            <button type="button" onclick="navigator.clipboard.writeText('{html.escape(u)}')">Copy</button>
+          </div>
+          <p class="includes">Includes: {includes}</p>
+        </article>"""
 
-    stable_dev = [c for c in channels if c["path"] in ("index.json", "dev/index.json")]
-    pinned = [c for c in channels if c not in stable_dev]
-    pinned_html = ("<h2>Linee di versione fissate</h2><div class=\"grid\">"
-                   + "".join(card(c) for c in pinned) + "</div>") if pinned else ""
+    main_ch = [c for c in channels if c["path"] in ("index.json", "dev/index.json")]
+    pinned = [c for c in channels if c not in main_ch]
+    pinned_section = ""
+    if pinned:
+        pinned_section = f"""
+  <div class="dots">• • •</div>
+  <section>
+    <h2>Pin to a version line <span class="muted" style="font-weight:400">— advanced</span></h2>
+    <p class="sub">Optional. Add one of these only to <strong>stay on a specific version line</strong> — e.g. keep a tool on <code>1.5.x</code> after <code>1.6</code> is released. For normal use, add <em>Stable</em> above instead.</p>
+    <div class="channels">{''.join(block(c) for c in pinned)}</div>
+  </section>"""
 
     page = f"""<!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Extended Matrix — Blender Extensions</title>
 <style>
-  :root {{ --bg:#0f1419; --fg:#e6e6e6; --muted:#9aa4ad; --accent:#e8772e; --card:#1a212b; --line:#2a3340; }}
+  :root {{ --fg:#1f2328; --muted:#59636e; --faint:#d0d7de; --accent:#1f6feb; --accent-bg:#ddebff; --code:#eff2f5; }}
   * {{ box-sizing:border-box; }}
-  body {{ margin:0; font:16px/1.55 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }}
-  header {{ padding:48px 24px 24px; border-bottom:1px solid var(--line); }}
-  .wrap {{ max-width:920px; margin:0 auto; }}
-  h1 {{ margin:0 0 6px; font-size:28px; }}
-  h2 {{ margin:36px 0 14px; font-size:20px; }}
-  .lead {{ color:var(--muted); margin:0; }}
-  .steps {{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 22px; margin:24px 0; }}
-  .steps ol {{ margin:0; padding-left:20px; }}
-  .grid {{ display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }}
-  .card {{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; }}
-  .card h3 {{ margin:0 0 6px; }}
-  .desc {{ color:var(--muted); font-size:14px; margin:0 0 12px; min-height:38px; }}
+  body {{ margin:0; background:#fff; color:var(--fg);
+         font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         -webkit-font-smoothing:antialiased; }}
+  main {{ max-width:760px; margin:0 auto; padding:72px 24px 96px; }}
+  h1 {{ font-size:34px; font-weight:700; letter-spacing:-.021em; margin:0 0 14px; }}
+  .lead {{ font-size:19px; color:var(--muted); margin:0; max-width:60ch; }}
+  h2 {{ font-size:21px; font-weight:600; margin:0 0 10px; letter-spacing:-.01em; }}
+  .sub {{ color:var(--muted); margin:0 0 8px; max-width:64ch; }}
+  .dots {{ text-align:center; color:var(--faint); letter-spacing:.7em; margin:52px 0; font-size:13px; }}
+  ol {{ color:#3b424b; padding-left:22px; margin:14px 0 0; }}
+  ol li {{ margin:7px 0; }}
+  .note {{ color:var(--muted); font-size:14.5px; margin:16px 0 0; }}
+  .channels {{ display:grid; gap:30px; grid-template-columns:1fr 1fr; margin-top:26px; }}
+  .channel h3 {{ font-size:18px; margin:0 0 4px; }}
+  .desc {{ color:var(--muted); font-size:15px; margin:0 0 18px; min-height:44px; }}
+  .dnd {{ display:inline-flex; align-items:center; gap:9px; text-decoration:none;
+          color:var(--accent); fill:var(--accent); font-weight:600; font-size:15px;
+          border:2px dashed #9cc4ff; border-radius:11px; padding:13px 18px; background:#f4f9ff;
+          transition:background .12s,border-color .12s; }}
+  .dnd:hover {{ background:var(--accent-bg); border-color:var(--accent); }}
+  .or {{ color:var(--muted); font-size:13px; margin:16px 0 7px; }}
   .url {{ display:flex; gap:8px; }}
-  .url input {{ flex:1; min-width:0; background:#0b0f14; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; font-family:ui-monospace,monospace; font-size:12px; }}
-  .url button {{ background:var(--accent); color:#1a1208; border:0; border-radius:6px; padding:8px 12px; font-weight:600; cursor:pointer; }}
-  .dd {{ font-size:12.5px; color:var(--muted); margin:10px 0 8px; }}
-  .contents {{ margin:8px 0 0; padding-left:18px; font-size:13px; color:var(--muted); }}
-  code {{ background:#0b0f14; padding:1px 6px; border-radius:4px; font-size:12px; }}
+  .url input {{ flex:1; min-width:0; font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+                padding:10px; border:1px solid var(--faint); border-radius:8px; background:#f6f8fa; color:var(--fg); }}
+  .url button {{ border:1px solid var(--faint); background:#f6f8fa; border-radius:8px; padding:10px 15px;
+                 cursor:pointer; font-weight:600; font-size:13px; color:var(--fg); }}
+  .url button:hover {{ background:#eceff2; }}
+  .includes {{ color:var(--muted); font-size:13px; margin:16px 0 0; }}
+  .muted {{ color:var(--muted); }}
+  code {{ background:var(--code); padding:1px 6px; border-radius:5px; font-size:12.5px; }}
   a {{ color:var(--accent); }}
-  footer {{ color:var(--muted); font-size:13px; padding:32px 24px; border-top:1px solid var(--line); margin-top:40px; }}
+  footer {{ color:#8c959f; font-size:13px; margin-top:72px; text-align:center; }}
+  @media (max-width:600px) {{ .channels {{ grid-template-columns:1fr; }} main {{ padding:48px 20px 72px; }} }}
 </style>
 </head>
 <body>
-<header><div class="wrap">
-  <h1>Extended Matrix — Blender Extensions</h1>
-  <p class="lead">Repository di estensioni per Blender 4.4+. Aggiungi un canale qui sotto e Blender terrà i tool aggiornati da solo.</p>
-</div></header>
-<main class="wrap" style="padding:0 24px;">
-  <div class="steps">
-    <strong>Come si installa (una volta per canale)</strong>
+<main>
+  <header>
+    <h1>Extended Matrix — Blender Extensions</h1>
+    <p class="lead">One-click install and automatic updates for the Extended Matrix Blender tools. Add a channel in Blender 4.4+ and it stays up to date.</p>
+  </header>
+
+  <div class="dots">• • •</div>
+
+  <section>
+    <h2>How it works</h2>
+    <p class="sub">Each channel is a <strong>single repository</strong> you add to Blender <strong>once</strong>. It bundles <strong>both</strong> tools — <strong>EM Tools</strong> and <strong>3D Survey Collection</strong> — and Blender keeps them updated for you.</p>
     <ol>
-      <li>Copia l'URL del canale che vuoi.</li>
-      <li>Blender → <em>Edit → Preferences → Get Extensions → Repositories → ＋ → Add Remote Repository</em>, incolla l'URL.</li>
-      <li>Attiva <em>Check for Updates on Start</em> per gli aggiornamenti automatici.</li>
-      <li>Trovi i tool nella lista estensioni: installa ed abilita.</li>
+      <li>Drag the <em>Drag &amp; Drop into Blender</em> handle below into the Blender window — or copy the channel URL.</li>
+      <li>If you copied it: <em>Edit ▸ Preferences ▸ Get Extensions ▸ Repositories ▸ + ▸ Add Remote Repository</em>, then paste.</li>
+      <li>Keep <em>Check for Updates on Start</em> enabled for automatic updates.</li>
+      <li>Find the tools in the extensions list, install and enable.</li>
     </ol>
-  </div>
-  <h2>Canali principali</h2>
-  <div class="grid">{''.join(card(c) for c in stable_dev)}</div>
-  {pinned_html}
+    <p class="note">Using drag &amp; drop you’ll do it <strong>twice</strong>: the first adds the repository, the second installs.</p>
+  </section>
+
+  <div class="dots">• • •</div>
+
+  <section>
+    <h2>Choose a channel</h2>
+    <p class="sub">Add just <strong>one</strong>: <strong>Stable</strong> for everyday use, or <strong>Dev</strong> to try prereleases.</p>
+    <div class="channels">{''.join(block(c) for c in main_ch)}</div>
+  </section>
+{pinned_section}
+  <footer>Generated from the tools’ GitHub Releases · <a href="https://www.extendedmatrix.org">extendedmatrix.org</a></footer>
 </main>
-<footer><div class="wrap">
-  Generato da <code>scripts/build_repo.py</code> dalle GitHub Releases dei tool ·
-  <a href="https://www.extendedmatrix.org">extendedmatrix.org</a>
-</div></footer>
 </body>
 </html>
 """
