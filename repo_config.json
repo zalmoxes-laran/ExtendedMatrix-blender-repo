@@ -1,0 +1,55 @@
+{
+  "site_url": "https://blender.extendedmatrix.org",
+
+  "// blender_tag_ranges": "Maps the CI Blender tag (encoded in each asset filename) to the Blender version range the package is valid for. This is how a single repository serves one zip to Blender 4.4-5.0 (Python 3.11) and a different zip to Blender 5.1+ (Python 3.13). 'max' is the EXCLUSIVE upper bound (Blender's blender_version_max semantics). Adjust here if Blender's version->Python mapping shifts.",
+  "blender_tag_ranges": {
+    "blender50": { "min": "4.4.0", "max": "5.1.0" },
+    "blender51": { "min": "5.1.0", "max": null }
+  },
+
+  "// platform_map": "Maps the platform token used in CI asset filenames to Blender's official platform IDs (manifest 'platforms' values).",
+  "platform_map": {
+    "windows-x64": "windows-x64",
+    "macosx-arm64": "macos-arm64",
+    "macosx-x64": "macos-x64",
+    "linux-x64": "linux-x64"
+  },
+
+  "// tools": "One entry per extension. 'repo' is the GitHub repo whose Releases hold the platform zips. 'slug' is the URL segment used for pinned version-line channels (/<slug>/<major>.<minor>/index.json). The descriptive fields below are copied verbatim into every index.json entry for that tool (they are stable across versions; edit here if they ever change).",
+  "tools": [
+    {
+      "id": "em_tools",
+      "repo": "zalmoxes-laran/EM-blender-tools",
+      "slug": "em",
+      "name": "EM Tools",
+      "tagline": "Blender tools for Extended Matrix",
+      "type": "add-on",
+      "maintainer": "E. Demetrescu <emanuel.demetrescu@cnr.it>",
+      "license": ["SPDX:GPL-3.0-or-later"],
+      "website": "https://www.extendedmatrix.org",
+      "tags": ["3D View", "Import-Export"],
+      "schema_version": "1.0.0",
+      "permissions": {
+        "files": "Import and export data",
+        "network": "Download resources and updates",
+        "clipboard": "Copy and paste data"
+      }
+    },
+    {
+      "id": "dsc_tools",
+      "repo": "zalmoxes-laran/3D-survey-collection",
+      "slug": "dsc",
+      "name": "3D Survey Collection",
+      "tagline": "Tools for 3D survey: LOD, Cesium tiles, ortho & panorama",
+      "type": "add-on",
+      "maintainer": "E. Demetrescu <emanuel.demetrescu@cnr.it>",
+      "license": ["SPDX:GPL-3.0-or-later"],
+      "website": "https://www.extendedmatrix.org",
+      "tags": ["3D View", "Import-Export"],
+      "schema_version": "1.0.0",
+      "permissions": {
+        "files": "Import and export survey data, 3D models and textures"
+      }
+    }
+  ]
+}

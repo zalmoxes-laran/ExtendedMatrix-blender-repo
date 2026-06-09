@@ -1,0 +1,68 @@
+name: Build extension repository
+
+# Regenerates the index.json channels from the tools' GitHub Releases and
+# deploys them (+ landing page) to GitHub Pages at blender.extendedmatrix.org.
+#
+# No archives are downloaded: the generator reads each release asset's sha256
+# `digest` and `size` straight from the GitHub API, so a run is fast and cheap
+# even though the EM zips are ~200 MB each.
+#
+# NOTE: GitHub Pages must be set to Source = "GitHub Actions"
+# (Settings -> Pages), otherwise Pages runs Jekyll on the repo.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'        # nightly safety net: pick up new releases
+  repository_dispatch:
+    types: [tool-released]       # tools can ping this for an instant rebuild
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'repo_config.json'
+      - 'public/**'
+      - '.github/workflows/deploy.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Generate index.json channels + landing page
+        env:
+          GH_TOKEN: ${{ github.token }}   # reads PUBLIC releases of the tool repos
+        run: python3 scripts/build_repo.py --config repo_config.json --out dist
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
