@@ -66,3 +66,28 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+  # ── tell the next link in the chain that a release is out ──────────────
+  # The chain: tool release → extension repository (blender.extendedmatrix.org)
+  # → extendedmatrix.org, which reads the version where it is published.
+  # Without the secret SITE_DISPATCH_TOKEN the step says so and does nothing:
+  # the scheduled builds downstream still pick the release up. It never fails
+  # the release. See ExtendedMatrix-site/docs/RELEASE-PROPAGATION.md.
+  notify-release:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch «em-release» to zalmoxes-laran/ExtendedMatrix-site
+        env:
+          TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::notice::SITE_DISPATCH_TOKEN is not set: zalmoxes-laran/ExtendedMatrix-site will see this release at its next scheduled build."
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/zalmoxes-laran/ExtendedMatrix-site/dispatches \
+            -d '{"event_type":"em-release","client_payload":{"repo":"${{ github.repository }}","ref":"${{ github.ref_name }}"}}' \
+            || echo "::warning::dispatch to zalmoxes-laran/ExtendedMatrix-site failed; it will rebuild on its schedule"
